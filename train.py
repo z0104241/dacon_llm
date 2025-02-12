@@ -6,11 +6,9 @@ from transformers import TrainingArguments
 from trl import SFTTrainer
 from unsloth import FastLanguageModel, is_bfloat16_supported
 
-# 데이터 처리 및 유틸 함수 임포트
 from data_processing import load_train_dataset
-from utils import tokenize_function, get_device
+from utils import tokenize_function  # get_device 제거 가능
 
-# 설정 값 불러오기 (config.py)
 from config import (
     TRAIN_CSV,
     RESULTS_DIR,
@@ -31,26 +29,22 @@ from config import (
 )
 
 def main():
-    # 현재 디렉터리를 모듈 검색 경로에 추가 (필요한 경우)
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    # 단일 프로세스 실행이므로 device 관련 코드는 생략
+    print("[Setup] Using all available GPUs for model parallelism")
     
-    # 디바이스 설정 (예: LOCAL_RANK 환경변수 활용)
-    device = get_device()
-    print(f"[Setup] Using device: {device}")
-    
-    # 학습 데이터 로드 및 프롬프트 생성
+    # 학습 데이터 로드 및 전처리
     train_dataset = load_train_dataset(TRAIN_CSV)
     print(f"[Preprocessing] Loaded training dataset with {len(train_dataset)} examples.")
     
-    # 모델 및 토크나이저 불러오기 (4-bit 양자화 옵션 사용)
+    # 모델 및 토크나이저 로드 (모델 병렬 분산 적용)
     model, tokenizer = FastLanguageModel.from_pretrained(
         MODEL_ID,
         load_in_4bit=True,
-        device_map="balanced"
+        device_map="balanced"  # 여러 GPU에 균등 분산
     )
-    model.to(device)
+    # model.to(device) 호출 제거
     
-    # LoRA 적용 (config.py에 정의된 설정값 사용)
+    # LoRA 적용
     model = FastLanguageModel.get_peft_model(
         model,
         r=LORA_R,
@@ -64,17 +58,16 @@ def main():
         loftq_config=LORA_LOFTQ_CONFIG,
     )
     
-    # 토크나이즈: 데이터셋의 각 예제에 대해 토크나이저 적용
+    # 토크나이즈
     tokenized_dataset = train_dataset.map(lambda ex: tokenize_function(tokenizer, ex), batched=True)
     print(f"[Fine-tuning] Tokenization complete: {len(tokenized_dataset)} examples.")
     
-    # 학습/검증 데이터셋 분할 (예: 90% 학습, 10% 검증)
     split_dataset = tokenized_dataset.train_test_split(test_size=0.1, seed=42)
     train_split = split_dataset["train"]
     eval_split = split_dataset["test"]
     print(f"[Preprocessing] Training dataset: {len(train_split)} examples, Validation dataset: {len(eval_split)} examples")
     
-    # 학습 인자 설정 (각 GPU 기준 배치 사이즈 등)
+    # 학습 인자 설정
     training_args = TrainingArguments(
         output_dir=RESULTS_DIR,
         num_train_epochs=NUM_EPOCHS,
@@ -107,7 +100,6 @@ def main():
     trainer.train()
     print("[Fine-tuning] Fine-tuning complete!")
     
-    # 파인튜닝 완료 후 모델과 토크나이저 저장
     finetuned_model_path = os.path.join(RESULTS_DIR, "finetuned_model")
     model.save_pretrained(finetuned_model_path)
     tokenizer.save_pretrained(finetuned_model_path)

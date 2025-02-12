@@ -7,7 +7,7 @@ import os
 MODEL_ID = "unsloth/Llama-3.3-70B-Instruct-bnb-4bit"
 
 # 학습 하이퍼파라미터
-NUM_EPOCHS = 3
+NUM_EPOCHS = 1
 PER_DEVICE_BATCH_SIZE = 4
 GRADIENT_ACCUMULATION_STEPS = 4
 LEARNING_RATE = 2e-5
