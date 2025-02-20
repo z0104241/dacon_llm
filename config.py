@@ -7,9 +7,9 @@ import os
 MODEL_ID = "unsloth/Llama-3.3-70B-Instruct-bnb-4bit"
 
 # 학습 하이퍼파라미터
-NUM_EPOCHS = 3
-PER_DEVICE_BATCH_SIZE = 4
-GRADIENT_ACCUMULATION_STEPS = 4
+NUM_EPOCHS = 1
+PER_DEVICE_BATCH_SIZE = 2
+GRADIENT_ACCUMULATION_STEPS = 2
 LEARNING_RATE = 2e-5
 
 # LoRA 설정 (파라미터 수를 줄이기 위한 설정)

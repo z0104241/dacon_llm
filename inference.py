@@ -5,40 +5,48 @@ import pandas as pd
 from tqdm import tqdm
 from unsloth import FastLanguageModel
 from data_processing import load_test_dataframe
-from utils import clean_output, get_device
+from utils import clean_output  # get_device 제거 가능
 from config import TEST_CSV, RESULTS_DIR
 
 def main():
-    # 디바이스 설정
-    device = get_device()
-    print(f"[Inference] Using device: {device}")
+    print("[Inference] Loading fine-tuned model using model parallelism")
     
-    # 테스트 데이터 로드 및 프롬프트 생성
-    test_df = load_test_dataframe(TEST_CSV)
-    print("[Inference] Test prompts created.")
-    
-    # 파인튜닝된 모델 및 토크나이저 로드
+    # 모델과 토크나이저 로드 (모델 병렬 분산 적용)
     finetuned_model_path = os.path.join(RESULTS_DIR, "finetuned_model")
-    model, tokenizer = FastLanguageModel.from_pretrained(finetuned_model_path)
-    model.to(device)
+    model, tokenizer = FastLanguageModel.from_pretrained(
+        finetuned_model_path,
+        device_map="balanced"  # 여러 GPU에 분산
+    )
     
-    # 다중 GPU 사용 시 DataParallel 적용
-    if torch.cuda.device_count() > 1:
-        print(f"[Inference] Using DataParallel with {torch.cuda.device_count()} GPUs.")
-        model = torch.nn.DataParallel(model)
+    # 특수 토큰 등 필요한 경우 추가 (이미 적용되어 있다면 생략)
+    # special_tokens = {"additional_special_tokens": ["<|begin_of_text|>", "<|start_header_id|>", "<|end_header_id|>", "<|eot_id|>"]}
+    # tokenizer.add_special_tokens(special_tokens)
+    # model.resize_token_embeddings(len(tokenizer))
     
+    # 테스트 데이터 로드 및 프롬프트, token 컬럼 생성
+    test_df = load_test_dataframe(TEST_CSV, tokenizer)
+    print("[Inference] Test prompts and token counts created.")
+    
+    # 모델을 추론 모드로 설정
     model = FastLanguageModel.for_inference(model)
     print("[Inference] Fine-tuned model loaded and set to inference mode")
     
-    # 각 프롬프트에 대해 예측 수행 (beam search 사용)
     predictions = []
-    for prompt in tqdm(test_df["prompt"], desc="Generating predictions"):
+    # DataFrame의 각 행을 순회하면서, 해당 행의 token 값에 따라 max_length 설정
+    for idx, row in tqdm(test_df.iterrows(), total=len(test_df), desc="Generating predictions"):
+        prompt = row["prompt"]
+        token_val = row["token"]
         inputs = tokenizer(prompt, return_tensors="pt")
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        # 입력 데이터를 GPU로 이동
+        inputs = {k: v.to("cuda") for k, v in inputs.items()}
+        # prompt의 토큰 수 계산 (add_special_tokens=False)
+        prompt_token_count = len(tokenizer.encode(prompt, add_special_tokens=False))
+        max_length = prompt_token_count + token_val 
+        
         generated_ids = model.generate(
             **inputs,
-            max_length=inputs["input_ids"].shape[1] + 128,
-            num_beams=3,
+            max_length=max_length,
+            num_beams=1,
             early_stopping=True,
             no_repeat_ngram_size=2,
         )
@@ -48,7 +56,7 @@ def main():
         predictions.append(output)
     
     test_df["output"] = predictions
-    output_csv_path = os.path.join(RESULTS_DIR, "test_with_predictions.csv")
+    output_csv_path = os.path.join(RESULTS_DIR, "test_output_0217.csv")
     test_df.to_csv(output_csv_path, index=False)
     print(f"[Inference] Predictions saved to: {output_csv_path}")
 
